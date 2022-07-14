@@ -1,0 +1,140 @@
+"allow-newer": false
+"extra-deps":
+- "HsYAML-0.2.1.1"
+- "OneTuple-0.3.1"
+- "QuickCheck-2.14.2"
+- "StateVar-1.2.2"
+- "aeson-2.0.3.0"
+- "ansi-terminal-0.11.3"
+- "ansi-wl-pprint-0.6.9"
+- "assoc-1.0.2"
+- "attoparsec-0.14.4"
+- "base-compat-0.12.1"
+- "base-compat-batteries-0.12.1"
+- "base-orphans-0.8.6"
+- "base16-bytestring-1.0.2.0"
+- "bifunctors-5.5.12"
+- "cabal-plan-0.7.2.1"
+- "colour-2.3.6"
+- "comonad-5.0.8"
+- "contravariant-1.5.5"
+- "data-fix-0.3.2"
+- "distributive-0.6.2.1"
+- "dlist-1.0"
+- "hashable-1.4.0.2"
+- "indexed-profunctors-0.1.1"
+- "indexed-traversable-0.1.2"
+- "indexed-traversable-instances-0.1.1"
+- "integer-logarithms-1.0.3.1"
+- "optics-0.4.2"
+- "optics-core-0.4.1"
+- "optics-extra-0.4.2.1"
+- "optics-th-0.4.1"
+- "optparse-applicative-0.17.0.0"
+- "primitive-0.7.4.0"
+- "random-1.2.1.1"
+- "scientific-0.3.7.0"
+- "semialign-1.2.0.1"
+- "semigroupoids-5.3.7"
+- "splitmix-0.1.0.4"
+- "strict-0.4.0.1"
+- "tagged-0.8.6.1"
+- "text-short-0.1.5"
+- "th-abstraction-0.4.3.0"
+- "these-1.1.1.1"
+- "time-compat-1.9.6.1"
+- "transformers-compat-0.7.2"
+- "unordered-containers-0.2.19.1"
+- "uuid-types-1.0.5"
+- "vector-0.12.3.1"
+- "witherable-0.4.2"
+flags:
+  HsYAML:
+    exe: false
+  QuickCheck:
+    "old-random": false
+    templatehaskell: true
+  aeson:
+    cffi: false
+    "ordered-keymap": true
+  "ansi-terminal":
+    example: false
+  "ansi-wl-pprint":
+    example: false
+  attoparsec:
+    developer: false
+  bifunctors:
+    semigroups: true
+    tagged: true
+  "cabal-plan":
+    _: false
+    exe: false
+    "license-report": false
+  comonad:
+    containers: true
+    distributive: true
+    "indexed-traversable": true
+  contravariant:
+    semigroups: true
+    statevar: true
+    tagged: true
+  distributive:
+    semigroups: true
+    tagged: true
+  dlist:
+    werror: false
+  hashable:
+    containers: true
+    "integer-gmp": true
+    "random-initial-seed": false
+  "integer-logarithms":
+    "check-bounds": false
+    "integer-gmp": true
+  "optics-core":
+    "explicit-generic-labels": false
+  "optparse-applicative":
+    process: true
+  scientific:
+    "bytestring-builder": false
+    "integer-simple": false
+  semialign:
+    semigroupoids: true
+  semigroupoids:
+    comonad: true
+    containers: true
+    contravariant: true
+    distributive: true
+    tagged: true
+    "unordered-containers": true
+  splitmix:
+    "optimised-mixer": false
+  strict:
+    assoc: true
+  tagged:
+    deepseq: true
+    transformers: true
+  "text-short":
+    asserts: false
+  these:
+    assoc: true
+  "time-compat":
+    "old-locale": false
+  "transformers-compat":
+    five: false
+    "five-three": true
+    four: false
+    "generic-deriving": true
+    mtl: true
+    three: false
+    two: false
+  "unordered-containers":
+    debug: false
+  vector:
+    boundschecks: true
+    internalchecks: false
+    unsafechecks: false
+    wall: false
+packages:
+- .
+resolver: "ghc-9.0.2"
+"system-ghc": true
