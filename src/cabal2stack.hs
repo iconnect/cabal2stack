@@ -11,6 +11,7 @@
 module Main (main) where
 
 import Control.Applicative       ((<**>), (<|>))
+import Control.Exception         (IOException, catch)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT, execStateT)
 import Data.Char                 (isHexDigit)
@@ -18,9 +19,9 @@ import Data.Foldable             (traverse_)
 import Data.Map.Strict           (Map)
 import Data.Set                  (Set)
 import Data.Text                 (Text)
-import System.Directory          (getCurrentDirectory)
-import System.Exit               (exitFailure)
-import System.FilePath           (makeRelative)
+import System.Directory          (getCurrentDirectory, listDirectory)
+import System.Exit               (exitFailure, ExitCode (..))
+import System.FilePath           (makeRelative, (</>))
 import System.IO                 (hPutStrLn, stderr)
 
 import Optics
@@ -34,6 +35,7 @@ import qualified Data.Set             as Set
 import qualified Data.Text            as T
 import qualified Data.YAML            as Y
 import qualified Options.Applicative  as O
+import qualified System.Process       as Proc
 
 -------------------------------------------------------------------------------
 -- Main
@@ -99,13 +101,35 @@ optsP = do
 -------------------------------------------------------------------------------
 
 tagsToCommits :: GitRepo -> IO GitRepo
-tagsToCommits gitrepo@(GitRepo _url tag _subdir)
-    | isCommit = pure gitrepo
-    | otherwise = do
-        hPutStrLn stderr $ "Tag is not a commit in " ++ show gitrepo ++ "; stack might barf"
-        pure gitrepo
+tagsToCommits gitrepo@(GitRepo url tag subdir)
+    | isCommit tag = pure gitrepo
+    | otherwise    = do
+        let srcDir = "dist-newstyle/src"
+        contents <- catchIO (listDirectory srcDir) (\_ -> return [])
+        mcommit <- findM contents $ \dir -> handleIO (\_ -> return Nothing) $ do
+            -- look up that url is in remotes
+            (ec, out, _) <- Proc.readCreateProcessWithExitCode (Proc.proc "git" ["remote", "-v"]) { Proc.cwd = Just (srcDir </> dir) } ""
+            if isExitSuccess ec && T.isInfixOf url (T.pack out)
+            then do
+                -- try to lookup tag
+                (ec2, out2, _) <- Proc.readCreateProcessWithExitCode (Proc.proc "git" ["rev-list", "-n", "1", T.unpack tag]) { Proc.cwd = Just (srcDir </> dir) } ""
+                let commit = T.strip (T.pack out2)
+                if isExitSuccess ec2 && isCommit commit
+                then return (Just commit)
+                else return Nothing
+            else return Nothing
+
+        case mcommit of
+            Just commit -> do
+                hPutStrLn stderr $ "Tag is not a commit in " ++ show gitrepo ++ "; found commit " ++ T.unpack commit
+                return (GitRepo url commit subdir)
+
+            Nothing -> do
+                hPutStrLn stderr $ "Tag is not a commit in " ++ show gitrepo ++ "; commit not found, stack will barf"
+                return gitrepo
   where
-    isCommit = T.length tag == 40 && T.all isHexDigit tag
+    isCommit t = T.length t == 40 && T.all isHexDigit t
+
 
 
 -------------------------------------------------------------------------------
@@ -213,3 +237,21 @@ instance Y.ToYAML StackYaml where
 
 traverseSet :: (Applicative f, Ord b) => (a -> f b) -> Set a -> f (Set b)
 traverseSet f xs = Set.fromList <$> traverse f (Set.toList xs)
+
+catchIO :: IO a -> (IOException -> IO a) -> IO a
+catchIO = catch
+
+handleIO :: (IOException -> IO a) -> IO a -> IO a
+handleIO = flip catchIO
+
+findM :: Monad m => [a] -> (a -> m (Maybe b)) -> m (Maybe b)
+findM []     _ = return Nothing
+findM (x:xs) f = do
+    y <- f x
+    case y of
+        Just _  -> return y
+        Nothing -> findM xs f
+
+isExitSuccess :: ExitCode -> Bool
+isExitSuccess ExitSuccess     = True
+isExitSuccess (ExitFailure _) = False
