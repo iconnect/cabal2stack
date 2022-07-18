@@ -13,6 +13,7 @@ module Main (main) where
 import Control.Applicative       ((<**>), (<|>))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT, execStateT)
+import Data.Char                 (isHexDigit)
 import Data.Foldable             (traverse_)
 import Data.Map.Strict           (Map)
 import Data.Set                  (Set)
@@ -22,7 +23,8 @@ import System.Exit               (exitFailure)
 import System.FilePath           (makeRelative)
 import System.IO                 (hPutStrLn, stderr)
 
-import Optics                 (A_Lens, LabelOptic (..), lensVL, (<&>))
+import Optics
+       (A_Lens, LabelOptic (..), lensVL, traversalVL, traverseOf, (%), (<&>))
 import Optics.State.Operators ((%=))
 
 import qualified Cabal.Plan           as P
@@ -48,8 +50,8 @@ main = do
 
     S packages extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
 
-    let stackYaml :: StackYaml
-        stackYaml = StackYaml
+    let stackYaml0 :: StackYaml
+        stackYaml0 = StackYaml
             { syResolver    = P.pjCompilerId plan
             , sySystemGHC   = optsSystemGHC
             , syAllowNewer  = optsAllowNewer
@@ -58,6 +60,8 @@ main = do
             , syFlags       = flags
             , syGitPackages = gitPackages
             }
+
+    stackYaml <- traverseOf (#gitPackages % traversalVL traverseSet) tagsToCommits stackYaml0
 
     case optsOutput of
         "-" -> LBS.putStr (Y.encode [stackYaml])
@@ -89,6 +93,20 @@ optsP = do
     optsOutput <- O.strOption (O.short 'o' <> O.long "output" <> O.value "stack.yaml" <> O.help "Output location")
 
     pure Opts {..}
+
+-------------------------------------------------------------------------------
+-- git tags to commits
+-------------------------------------------------------------------------------
+
+tagsToCommits :: GitRepo -> IO GitRepo
+tagsToCommits gitrepo@(GitRepo _url tag _subdir)
+    | isCommit = pure gitrepo
+    | otherwise = do
+        hPutStrLn stderr $ "Tag is not a commit in " ++ show gitrepo ++ "; stack might barf"
+        pure gitrepo
+  where
+    isCommit = T.length tag == 40 && T.all isHexDigit tag
+
 
 -------------------------------------------------------------------------------
 -- units
@@ -159,6 +177,9 @@ data StackYaml = StackYaml
     }
   deriving Show
 
+instance (k ~ A_Lens, a ~ Set GitRepo, b ~ Set GitRepo) => LabelOptic "gitPackages" k StackYaml StackYaml a b where
+    labelOptic = lensVL $ \f s -> f (syGitPackages s) <&> \x -> s { syGitPackages = x }
+
 instance Y.ToYAML StackYaml where
     toYAML StackYaml {..} = Y.mapping
         [ "resolver"    Y..= P.dispPkgId syResolver
@@ -185,3 +206,10 @@ instance Y.ToYAML StackYaml where
 
             | GitRepo l t d <- Set.toList syGitPackages
             ]
+
+-------------------------------------------------------------------------------
+-- utilities
+-------------------------------------------------------------------------------
+
+traverseSet :: (Applicative f, Ord b) => (a -> f b) -> Set a -> f (Set b)
+traverseSet f xs = Set.fromList <$> traverse f (Set.toList xs)
