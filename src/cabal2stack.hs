@@ -10,7 +10,7 @@
 {-# LANGUAGE UndecidableInstances   #-}
 module Main (main) where
 
-import Control.Applicative       ((<**>), (<|>))
+import Control.Applicative       ((<**>), (<|>), optional)
 import Control.Exception         (IOException, catch)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT, execStateT)
@@ -48,7 +48,10 @@ main = do
 
     cwd <- getCurrentDirectory
 
-    plan <- P.findAndDecodePlanJson (P.ProjectRelativeToDir cwd)
+    plan <- P.findAndDecodePlanJson $ maybe
+        (P.ProjectRelativeToDir cwd)
+        P.ExactPath
+        optsPlanJson
 
     S packages extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
 
@@ -76,6 +79,7 @@ main = do
 data Opts = Opts
     { optsSystemGHC  :: !Bool
     , optsAllowNewer :: !Bool
+    , optsPlanJson   :: !(Maybe FilePath)
     , optsOutput     :: !FilePath
     }
   deriving Show
@@ -92,7 +96,9 @@ optsP = do
         O.flag' False (O.long "no-allow-newer" <> O.help "Don't include allow-newer: True") <|>
         pure False
 
-    optsOutput <- O.strOption (O.short 'o' <> O.long "output" <> O.value "stack.yaml" <> O.help "Output location")
+    optsPlanJson <- optional $ O.strOption (O.long "plan-json" <> O.metavar "PATH" <> O.help "Use provided plan.json")
+
+    optsOutput <- O.strOption (O.short 'o' <> O.long "output" <> O.metavar "PATH" <> O.value "stack.yaml" <> O.help "Output location")
 
     pure Opts {..}
 
