@@ -10,23 +10,25 @@
 {-# LANGUAGE UndecidableInstances   #-}
 module Main (main) where
 
-import Control.Applicative       ((<**>), (<|>), optional)
+import Control.Applicative       (optional, (<**>), (<|>))
 import Control.Exception         (IOException, catch)
+import Control.Monad             (unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT, execStateT)
 import Data.Char                 (isHexDigit)
-import Data.Foldable             (traverse_)
+import Data.Foldable             (for_, traverse_)
 import Data.Map.Strict           (Map)
 import Data.Set                  (Set)
 import Data.Text                 (Text)
 import System.Directory          (getCurrentDirectory, listDirectory)
-import System.Exit               (exitFailure, ExitCode (..))
+import System.Exit               (ExitCode (..), exitFailure)
 import System.FilePath           (makeRelative, (</>))
 import System.IO                 (hPutStrLn, stderr)
 
 import Optics
-       (A_Lens, LabelOptic (..), lensVL, traversalVL, traverseOf, (%), (<&>))
-import Optics.State.Operators ((%=))
+       (A_Lens, LabelOptic (..), at, lensVL, traversalVL, traverseOf, (%),
+       (<&>))
+import Optics.State.Operators ((%=), (<<?=), (?=))
 
 import qualified Cabal.Plan           as P
 import qualified Data.ByteString.Lazy as LBS
@@ -53,7 +55,7 @@ main = do
         P.ExactPath
         optsPlanJson
 
-    S packages extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
+    S packages _pkgVers extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
 
     let stackYaml0 :: StackYaml
         stackYaml0 = StackYaml
@@ -61,7 +63,7 @@ main = do
             , sySystemGHC   = optsSystemGHC
             , syAllowNewer  = optsAllowNewer
             , syPackages    = Set.map (makeRelative cwd) packages
-            , syExtraDeps   = extraDeps
+            , syExtraDeps   = Set.fromList [ P.PkgId pn ver | (pn, ver) <- Map.toList extraDeps ]
             , syFlags       = flags
             , syGitPackages = gitPackages
             }
@@ -144,7 +146,8 @@ tagsToCommits gitrepo@(GitRepo url tag subdir)
 
 data S = S
     { _sPackages  :: !(Set FilePath)
-    , _sExtraDeps :: !(Set P.PkgId)
+    , _sPkgVers   :: !(Map P.PkgName P.Ver)
+    , _sExtraDeps :: !(Map P.PkgName P.Ver)
     , _sFlags     :: !(Map P.PkgName (Map P.FlagName Bool))
     , _sGitPkgs   :: !(Set GitRepo)
     }
@@ -154,34 +157,40 @@ data GitRepo = GitRepo !Text !Text !(Maybe FilePath)
   deriving (Show, Eq, Ord)
 
 instance (k ~ A_Lens, a ~ Set FilePath, b ~ Set FilePath) => LabelOptic "packages" k S S a b where
-    labelOptic = lensVL $ \f (S x a b c) -> f x <&> \x' -> S x' a b c
+    labelOptic = lensVL $ \f (S x a b c d) -> f x <&> \x' -> S x' a b c d
 
-instance (k ~ A_Lens, a ~ Set P.PkgId, b ~ Set P.PkgId) => LabelOptic "extraDeps" k S S a b where
-    labelOptic = lensVL $ \f (S a x b c) -> f x <&> \x' -> S a x' b c
+instance (k ~ A_Lens, a ~ Map P.PkgName P.Ver, b ~ Map P.PkgName P.Ver) => LabelOptic "pkgVers" k S S a b where
+    labelOptic = lensVL $ \f (S a x b c d) -> f x <&> \x' -> S a x' b c d
+
+instance (k ~ A_Lens, a ~ Map P.PkgName P.Ver, b ~ Map P.PkgName P.Ver) => LabelOptic "extraDeps" k S S a b where
+    labelOptic = lensVL $ \f (S a b x c d) -> f x <&> \x' -> S a b x' c d
 
 instance (k ~ A_Lens, a ~ Map P.PkgName (Map P.FlagName Bool), b ~ Map P.PkgName (Map P.FlagName Bool)) => LabelOptic "flags" k S S a b where
-    labelOptic = lensVL $ \f (S a b x c) -> f x <&> \x' -> S a b x' c
+    labelOptic = lensVL $ \f (S a b c x d) -> f x <&> \x' -> S a b c x' d
 
 instance (k ~ A_Lens, a ~ Set GitRepo, b ~ Set GitRepo) => LabelOptic "gitPackages" k S S a b where
-    labelOptic = lensVL $ \f (S a b c x) -> f x <&> \x' -> S a b c x'
+    labelOptic = lensVL $ \f (S a b c d x) -> f x <&> \x' -> S a b c d x'
 
 emptyS :: S
-emptyS = S Set.empty Set.empty Map.empty Set.empty
+emptyS = S Set.empty Map.empty Map.empty Map.empty Set.empty
 
 processUnits :: Foldable f => f P.Unit -> IO S
 processUnits units = execStateT (traverse_ f units) emptyS where
     f :: P.Unit -> StateT S IO ()
     f unit = do
-        let P.PkgId pn _ = P.uPId unit
+        let P.PkgId pn ver = P.uPId unit
+        checkMultipleVersions pn ver
+
         #flags %= Map.insert pn (P.uFlags unit)
 
         case P.uPkgSrc unit of
-            Nothing -> return ()
+            Nothing -> pure ()
+
             Just (P.LocalUnpackedPackage fp) -> do
                 #packages %= Set.insert fp
 
             Just (P.RepoTarballPackage _) -> do
-                #extraDeps %= Set.insert (P.uPId unit)
+                #extraDeps % at pn ?= ver
 
             Just (P.RemoteSourceRepoPackage (P.SourceRepo { P.srType = Just P.Git, P.srLocation = Just l, P.srTag = Just t, P.srSubdir = d })) -> do
                 #gitPackages %= Set.insert (GitRepo l t d)
@@ -189,6 +198,12 @@ processUnits units = execStateT (traverse_ f units) emptyS where
             Just ps -> lift $ do
                 hPutStrLn stderr $ "Not implemented PkgLoc: " ++ show ps
                 exitFailure
+
+    checkMultipleVersions :: P.PkgName -> P.Ver -> StateT S IO ()
+    checkMultipleVersions pn ver = do
+        mver' <- #pkgVers % at pn <<?= ver
+        for_ mver' $ \ver' -> unless (ver == ver') $
+            lift $ hPutStrLn stderr $ T.unpack $ "WARN: package " <> dispPkgName pn <> " has multiple versions: " <> P.dispVer ver <> " and " <> P.dispVer ver'
 
 -------------------------------------------------------------------------------
 -- stack.yaml
@@ -261,3 +276,6 @@ findM (x:xs) f = do
 isExitSuccess :: ExitCode -> Bool
 isExitSuccess ExitSuccess     = True
 isExitSuccess (ExitFailure _) = False
+
+dispPkgName :: P.PkgName -> Text
+dispPkgName (P.PkgName n) = n
