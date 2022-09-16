@@ -9,6 +9,7 @@ author:        Oleg Grenrus <oleg@well-typed.com>
 maintainer:    Well-Typed <info@well-typed.com>
 license:       BSD-3-Clause
 license-file:  LICENSE
+extra-source-files: README.md
 
 executable cabal2stack
   default-language: Haskell2010
