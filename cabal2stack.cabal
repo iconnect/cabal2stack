@@ -4,9 +4,9 @@ version:       0
 synopsis:      Create stack.yaml from cabal-install's plan.json
 description:   Create stack.yaml from cabal-install's plan.json.
 category:      Development
-copyright:     2022 Well-Typed LLP
+copyright:     2022 IRIS Connect Ltd
 author:        Oleg Grenrus <oleg@well-typed.com>
-maintainer:    Oleg Grenrus <oleg@well-typed.com>
+maintainer:    Well-Typed <info@well-typed.com>
 license:       BSD-3-Clause
 license-file:  LICENSE
 
