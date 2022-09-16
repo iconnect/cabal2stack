@@ -10,6 +10,11 @@ maintainer:    Well-Typed <info@well-typed.com>
 license:       BSD-3-Clause
 license-file:  LICENSE
 extra-source-files: README.md
+homepage:      https://github.com/iconnect/cabal2stack
+
+source-repository head
+    type:           git
+    location:       git://github.com/iconnect/cabal2stack.git
 
 executable cabal2stack
   default-language: Haskell2010
