@@ -59,7 +59,7 @@ main = do
 
     let stackYaml0 :: StackYaml
         stackYaml0 = StackYaml
-            { syResolver    = P.pjCompilerId plan
+            { syResolver    = maybe (ResolverPkg $ P.pjCompilerId plan) NamedResolver optsResolver
             , sySystemGHC   = optsSystemGHC
             , syAllowNewer  = optsAllowNewer
             , syPackages    = Set.map (makeRelative cwd) packages
@@ -81,6 +81,7 @@ main = do
 data Opts = Opts
     { optsSystemGHC  :: !Bool
     , optsAllowNewer :: !Bool
+    , optsResolver   :: !(Maybe String)
     , optsPlanJson   :: !(Maybe FilePath)
     , optsOutput     :: !FilePath
     }
@@ -97,6 +98,8 @@ optsP = do
         O.flag' True  (O.long "allow-newer" <> O.help "Include allow-newer: True") <|>
         O.flag' False (O.long "no-allow-newer" <> O.help "Don't include allow-newer: True") <|>
         pure False
+
+    optsResolver <- optional $ O.strOption (O.long "resolver" <> O.metavar "[LTS-version | nighly-yyyy-mm-dd]" <> O.help "Use provided resolver")
 
     optsPlanJson <- optional $ O.strOption (O.long "plan-json" <> O.metavar "PATH" <> O.help "Use provided plan.json")
 
@@ -209,10 +212,16 @@ processUnits units = execStateT (traverse_ f units) emptyS where
 -- stack.yaml
 -------------------------------------------------------------------------------
 
+data Resolver = NamedResolver String | ResolverPkg P.PkgId
+
+instance Show Resolver where
+    show (NamedResolver s) = s
+    show (ResolverPkg p) = T.unpack $ P.dispPkgId p
+
 -- TODO: group GitRepos
 -- TODO: sha256 hashes on extra-deps?
 data StackYaml = StackYaml
-    { syResolver    :: !P.PkgId
+    { syResolver    :: Resolver
     , sySystemGHC   :: !Bool
     , syAllowNewer  :: !Bool
     , syPackages    :: !(Set FilePath)
@@ -227,7 +236,7 @@ instance (k ~ A_Lens, a ~ Set GitRepo, b ~ Set GitRepo) => LabelOptic "gitPackag
 
 instance Y.ToYAML StackYaml where
     toYAML StackYaml {..} = Y.mapping
-        [ "resolver"    Y..= P.dispPkgId syResolver
+        [ "resolver"    Y..= T.pack (show syResolver)
         , "system-ghc"  Y..= sySystemGHC
         , "allow-newer" Y..= syAllowNewer
         , "packages"    Y..= map T.pack (Set.toList syPackages)
