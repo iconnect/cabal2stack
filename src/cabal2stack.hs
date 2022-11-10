@@ -99,7 +99,7 @@ optsP = do
         O.flag' False (O.long "no-allow-newer" <> O.help "Don't include allow-newer: True") <|>
         pure False
 
-    optsResolver <- optional $ O.strOption (O.long "resolver" <> O.metavar "[LTS-version | nighly-yyyy-mm-dd]" <> O.help "Use provided resolver")
+    optsResolver <- optional $ O.strOption (O.long "resolver" <> O.metavar "[LTS-version | nighlty-yyyy-mm-dd]" <> O.help "Use provided resolver")
 
     optsPlanJson <- optional $ O.strOption (O.long "plan-json" <> O.metavar "PATH" <> O.help "Use provided plan.json")
 
