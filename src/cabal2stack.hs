@@ -25,7 +25,7 @@ import System.Exit               (ExitCode (..), exitFailure)
 import System.FilePath           (makeRelative, (</>))
 import System.IO                 (hPutStrLn, stderr)
 
-import Optics
+import Optics.Core
        (A_Lens, LabelOptic (..), at, lensVL, traversalVL, traverseOf, (%),
        (<&>))
 import Optics.State.Operators ((%=), (<<?=), (?=))

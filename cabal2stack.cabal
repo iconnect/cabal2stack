@@ -39,5 +39,6 @@ executable cabal2stack
   build-depends:
     , cabal-plan            ^>=0.7.2.1
     , HsYAML                ^>=0.2.1.1
-    , optics                ^>=0.4.2
+    , optics-core           ^>=0.4
+    , optics-extra          ^>=0.4
     , optparse-applicative  ^>=0.17.0.0
