@@ -12,6 +12,8 @@ license-file:  LICENSE
 extra-source-files: README.md
 homepage:      https://github.com/iconnect/cabal2stack
 
+tested-with:   GHC ==8.10.7 || ==9.0.2 || ==9.2.5 || ==9.4.3
+
 source-repository head
     type:           git
     location:       git://github.com/iconnect/cabal2stack.git
