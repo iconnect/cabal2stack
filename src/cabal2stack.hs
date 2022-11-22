@@ -36,6 +36,7 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict      as Map
 import qualified Data.Set             as Set
 import qualified Data.Text            as T
+import qualified Data.Text.Read       as TR
 import qualified Data.YAML            as Y
 import qualified Options.Applicative  as O
 import qualified System.Process       as Proc
@@ -58,13 +59,19 @@ main = do
 
     S packages _pkgVers extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
 
+    resolverFile <- maybe (pure (ResolverFile [])) getResolverContents optsResolverFile
+    let resolverContents = Set.fromList (map resolverPackageName (resolverFilePackages resolverFile))
+
     let stackYaml0 :: StackYaml
         stackYaml0 = StackYaml
             { syResolver    = maybe (ResolverPkg $ P.pjCompilerId plan) (NamedResolver . T.pack) optsResolver
             , sySystemGHC   = optsSystemGHC
             , syAllowNewer  = optsAllowNewer
             , syPackages    = Set.map (makeRelative cwd) packages
-            , syExtraDeps   = Set.fromList [ P.PkgId pn ver | (pn, ver) <- Map.toList extraDeps ]
+            , syExtraDeps   = Set.fromList [ pkgid | (pn, ver) <- Map.toList extraDeps
+                                                   , let pkgid = P.PkgId pn ver
+                                                   , not (pkgid `Set.member` resolverContents)
+                                                   ]
             , syFlags       = flags
             , syGitPackages = gitPackages
             }
@@ -82,7 +89,8 @@ main = do
 data Opts = Opts
     { optsSystemGHC  :: !Bool
     , optsAllowNewer :: !Bool
-    , optsResolver   :: !(Maybe String)
+    , optsResolver   :: !(Maybe String)  -- ^ Name of the resolver, e.g. "lts-20.1"
+    , optsResolverFile :: !(Maybe FilePath) -- ^ Contents of the resolver as a YAML file
     , optsPlanJson   :: !(Maybe FilePath)
     , optsOutput     :: !FilePath
     }
@@ -101,6 +109,8 @@ optsP = do
         pure False
 
     optsResolver <- optional $ O.strOption (O.long "resolver" <> O.metavar "[LTS-version | nightly-yyyy-mm-dd]" <> O.help "Use provided resolver")
+
+    optsResolverFile <- optional $ O.strOption (O.long "resolver-file" <> O.metavar "PATH" <> O.help "Use contents of resolver from YAML file")
 
     optsPlanJson <- optional $ O.strOption (O.long "plan-json" <> O.metavar "PATH" <> O.help "Use provided plan.json")
 
@@ -263,6 +273,51 @@ instance Y.ToYAML StackYaml where
 
             | GitRepo l t d <- Set.toList syGitPackages
             ]
+
+
+-------------------------------------------------------------------------------
+-- resolvers
+-------------------------------------------------------------------------------
+
+data ResolverFile =
+  ResolverFile
+    { resolverFilePackages :: [ResolverPackage]
+    }
+
+instance Y.FromYAML ResolverFile where
+  parseYAML = Y.withMap "ResolverFile" $ \m -> ResolverFile
+                <$> m Y..: "packages"
+
+data ResolverPackage =
+  ResolverPackage
+    { resolverPackageName :: P.PkgId }
+
+instance Y.FromYAML ResolverPackage where
+  parseYAML = Y.withMap "ResolverPackage" $ \m -> ResolverPackage
+                 <$> (parsePackageName =<< m Y..: "hackage")
+
+parsePackageName :: Text -> Y.Parser P.PkgId
+parsePackageName s = do
+    nm <- maybe (fail "bad package name") pure $ T.stripSuffix "-" nmdash
+    vs <- mapM read_digit vers
+    pure $ P.PkgId (P.PkgName nm) (P.Ver vs)
+  where
+    -- Ignore the pantry key
+    (t, _) = T.breakOn "@" s
+    (nmdash, ver) = T.breakOnEnd "-" t
+    vers = T.splitOn "." ver
+
+    read_digit d = case TR.decimal d of
+                     Right (n, _) -> pure n
+                     Left err     -> fail ("read_digit: " ++ err)
+
+getResolverContents :: FilePath -> IO ResolverFile
+getResolverContents fp = do
+   b <- LBS.readFile fp
+   case Y.decode1 b of
+     Left (pos,x) -> hPutStrLn stderr (fp ++ ":" ++ Y.prettyPosWithSource pos b " error" ++ x) >> exitFailure
+     Right rf     -> pure $ rf
+
 
 -------------------------------------------------------------------------------
 -- utilities
