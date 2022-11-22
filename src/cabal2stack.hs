@@ -4,14 +4,11 @@
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedLabels       #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE RecordWildCards        #-}
-{-# LANGUAGE StandaloneDeriving     #-}
 {-# LANGUAGE TypeOperators          #-}
 {-# LANGUAGE UndecidableInstances   #-}
-{-# OPTIONS_GHC -Wwarn=orphans #-}
 module Main (main) where
 
 import Control.Applicative       (optional, (<**>), (<|>))
@@ -62,7 +59,7 @@ main = do
 
     S packages _pkgVers extraDeps flags gitPackages <- processUnits (P.pjUnits plan)
 
-    resolverFile <- maybe (pure (ResolverFile [] mempty)) getResolverContents optsResolverFile
+    resolverFile <- maybe (pure (ResolverFile [])) getResolverContents optsResolverFile
     let resolverContents = Set.fromList (map resolverPackageName (resolverFilePackages resolverFile))
 
     let stackYaml0 :: StackYaml
@@ -75,7 +72,7 @@ main = do
                                                    , let pkgid = P.PkgId pn ver
                                                    , not (pkgid `Set.member` resolverContents)
                                                    ]
-            , syFlags       = flags `diffFlags` resolverFileFlags resolverFile
+            , syFlags       = flags
             , syGitPackages = gitPackages
             }
 
@@ -84,13 +81,6 @@ main = do
     case optsOutput of
         "-" -> LBS.putStr (Y.encode [stackYaml])
         _   -> LBS.writeFile optsOutput (Y.encode [stackYaml])
-
-
-diffFlags :: Map P.PkgName (Map P.FlagName Bool)
-          -> Map P.PkgName (Map P.FlagName Bool)
-          -> Map P.PkgName (Map P.FlagName Bool)
-diffFlags = Map.differenceWith (\fs gs -> Just (Map.difference fs gs))
-
 
 -------------------------------------------------------------------------------
 -- options
@@ -292,16 +282,11 @@ instance Y.ToYAML StackYaml where
 data ResolverFile =
   ResolverFile
     { resolverFilePackages :: [ResolverPackage]
-    , resolverFileFlags    :: Map P.PkgName (Map P.FlagName Bool)
     }
-
-deriving instance Y.FromYAML P.PkgName
-deriving instance Y.FromYAML P.FlagName
 
 instance Y.FromYAML ResolverFile where
   parseYAML = Y.withMap "ResolverFile" $ \m -> ResolverFile
                 <$> m Y..: "packages"
-                <*> m Y..: "flags"
 
 data ResolverPackage =
   ResolverPackage
