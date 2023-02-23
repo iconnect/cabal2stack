@@ -1,18 +1,20 @@
-{-# LANGUAGE ApplicativeDo          #-}
-{-# LANGUAGE DataKinds              #-}
-{-# LANGUAGE FlexibleContexts       #-}
-{-# LANGUAGE FlexibleInstances      #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE OverloadedLabels       #-}
-{-# LANGUAGE OverloadedStrings      #-}
-{-# LANGUAGE RecordWildCards        #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE ApplicativeDo              #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedLabels           #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE ViewPatterns               #-}
 module Main (main) where
 
 import Control.Applicative       (optional, (<**>), (<|>))
-import Control.Exception         (IOException, catch)
+import Control.Exception         (IOException, catch, throwIO)
 import Control.Monad             (unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT, execStateT)
@@ -32,14 +34,18 @@ import Optics.Core
 import Optics.State.Operators ((%=), (<<?=), (?=))
 
 import qualified Cabal.Plan           as P
+import qualified Data.Aeson           as JS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict      as Map
 import qualified Data.Set             as Set
 import qualified Data.Text            as T
 import qualified Data.Text.Read       as TR
 import qualified Data.YAML            as Y
+import qualified Data.YAML.Aeson      as YA
 import qualified Options.Applicative  as O
 import qualified System.Process       as Proc
+import qualified Data.Aeson.KeyMap as JS
 
 -------------------------------------------------------------------------------
 -- Main
@@ -78,9 +84,44 @@ main = do
 
     stackYaml <- traverseOf (#gitPackages % traversalVL traverseSet) tagsToCommits stackYaml0
 
+    -- If the user requested to use an input .yaml file, decode it and overrides the keys.
+    stackYamlFile <- case optsInputYaml of
+      Nothing -> pure $ toInputYamlFile stackYaml
+      Just sy -> do
+        blueprint <- decodeInputYamlFileThrow sy
+        pure $ mergeStackYamlWith blueprint stackYaml
+
     case optsOutput of
-        "-" -> LBS.putStr (Y.encode [stackYaml])
-        _   -> LBS.writeFile optsOutput (Y.encode [stackYaml])
+        "-" -> LBS.putStr (Y.encode [stackYamlFile])
+        _   -> LBS.writeFile optsOutput (Y.encode [stackYamlFile])
+
+toInputYamlFile :: StackYaml -> InputYamlFile
+toInputYamlFile (Y.encode1 -> stackYamlAsBs) = case YA.decode1 stackYamlAsBs of
+  Left (pos,x) -> error ("call to toInputYamlFile failed: " ++ Y.prettyPosWithSource pos stackYamlAsBs " error" ++ x)
+  Right (JS.Object obj) -> InputYamlFile obj
+  Right x               -> error ("call to toInputYamlFile failed: convertion to JSON failed, type mismatch: " ++ typeOf x)
+  where
+    -- Cribbed from \"aeson\".
+    typeOf :: JS.Value -> String
+    typeOf v = case v of
+        JS.Object _ -> "Object"
+        JS.Array _  -> "Array"
+        JS.String _ -> "String"
+        JS.Number _ -> "Number"
+        JS.Bool _   -> "Boolean"
+        JS.Null     -> "Null"
+
+-- | Given an input 'InputYamlFile' (i.e. a list of 'Value's) and the
+-- 'StackYaml' that \"cabal2stack\" has computed.
+-- Returns the final 'InputYamlFile' to be dumped on disk.
+mergeStackYamlWith :: InputYamlFile -> StackYaml -> InputYamlFile
+mergeStackYamlWith (InputYamlFile yamlFile) (toInputYamlFile -> InputYamlFile sy) =
+  InputYamlFile $ JS.unionWith mergeFunction yamlFile sy
+  where
+    -- If the 'JS.Value' is present in both yamls, prefer the content of
+    -- cabal2stack-generated one.
+    mergeFunction :: JS.Value -> JS.Value -> JS.Value
+    mergeFunction _ v2 = v2
 
 -------------------------------------------------------------------------------
 -- options
@@ -92,6 +133,12 @@ data Opts = Opts
     , optsResolver   :: !(Maybe String)  -- ^ Name of the resolver, e.g. "lts-20.1"
     , optsResolverFile :: !(Maybe FilePath) -- ^ Contents of the resolver as a YAML file
     , optsPlanJson   :: !(Maybe FilePath)
+    -- | An optional path to an input /yaml/ file.
+    -- If 'Just', \"cabal2stack\" will parse its content and \"overlay\"
+    -- the content of this file with what \"cabal2stack\" would generate.
+    -- This allows preserving fields that don't have a direct translation
+    -- from cabal to stack.
+    , optsInputYaml  :: !(Maybe FilePath)
     , optsOutput     :: !FilePath
     }
   deriving Show
@@ -113,6 +160,8 @@ optsP = do
     optsResolverFile <- optional $ O.strOption (O.long "resolver-file" <> O.metavar "PATH" <> O.help "Use contents of resolver from YAML file")
 
     optsPlanJson <- optional $ O.strOption (O.long "plan-json" <> O.metavar "PATH" <> O.help "Use provided plan.json")
+
+    optsInputYaml <- optional $ O.strOption (O.long "input-yaml" <> O.metavar "PATH" <> O.help "Use an existing .yaml file as a blueprint, and let cabal2stack override certain fields.")
 
     optsOutput <- O.strOption (O.short 'o' <> O.long "output" <> O.metavar "PATH" <> O.value "stack.yaml" <> O.help "Output location")
 
@@ -231,6 +280,13 @@ instance Y.ToYAML Resolver where
     toYAML (NamedResolver s) = Y.toYAML s
     toYAML (ResolverPkg p) = Y.toYAML $ P.dispPkgId p
 
+-- | A raw input yaml file, represented fluidly as a JSON Object.
+newtype InputYamlFile = InputYamlFile JS.Object
+  deriving JS.FromJSON
+
+instance Y.ToYAML InputYamlFile where
+  toYAML (InputYamlFile obj) = Y.toYAML (JS.Object obj)
+
 -- TODO: group GitRepos
 -- TODO: sha256 hashes on extra-deps?
 data StackYaml = StackYaml
@@ -318,6 +374,14 @@ getResolverContents fp = do
      Left (pos,x) -> hPutStrLn stderr (fp ++ ":" ++ Y.prettyPosWithSource pos b " error" ++ x) >> exitFailure
      Right rf     -> pure $ rf
 
+-- | Decodes
+decodeInputYamlFileThrow :: FilePath -> IO InputYamlFile
+decodeInputYamlFileThrow fname = do
+   raw <- BSL.readFile fname
+   case YA.decode1 raw of
+     Left (loc,emsg) -> do
+       throwIO $ userError (fname ++ ":" ++ Y.prettyPosWithSource loc raw " error" ++ emsg)
+     Right persons -> pure persons
 
 -------------------------------------------------------------------------------
 -- utilities
