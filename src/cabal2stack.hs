@@ -128,7 +128,7 @@ mergeStackYamlWith (InputYamlFile yamlFile) (toInputYamlFile -> InputYamlFile sy
 -------------------------------------------------------------------------------
 
 data Opts = Opts
-    { optsSystemGHC  :: !Bool
+    { optsSystemGHC  :: !(Maybe Bool)  -- ^ Value of 'system-ghc' field ('Nothing' for not set)
     , optsAllowNewer :: !Bool
     , optsResolver   :: !(Maybe String)  -- ^ Name of the resolver, e.g. "lts-20.1"
     , optsResolverFile :: !(Maybe FilePath) -- ^ Contents of the resolver as a YAML file
@@ -145,10 +145,9 @@ data Opts = Opts
 
 optsP :: O.Parser Opts
 optsP = do
-    optsSystemGHC <-
+    optsSystemGHC <- O.optional $
         O.flag' True  (O.long "system-ghc" <> O.help "Use system ghc") <|>
-        O.flag' False (O.long "no-system-ghc" <> O.help "Use stack's ghc") <|>
-        pure True
+        O.flag' False (O.long "no-system-ghc" <> O.help "Use stack's ghc")
 
     optsAllowNewer <-
         O.flag' True  (O.long "allow-newer" <> O.help "Include allow-newer: True") <|>
@@ -291,7 +290,7 @@ instance Y.ToYAML InputYamlFile where
 -- TODO: sha256 hashes on extra-deps?
 data StackYaml = StackYaml
     { syResolver    :: !Resolver
-    , sySystemGHC   :: !Bool
+    , sySystemGHC   :: !(Maybe Bool)
     , syAllowNewer  :: !Bool
     , syPackages    :: !(Set FilePath)
     , syExtraDeps   :: !(Set P.PkgId)
@@ -304,9 +303,8 @@ instance (k ~ A_Lens, a ~ Set GitRepo, b ~ Set GitRepo) => LabelOptic "gitPackag
     labelOptic = lensVL $ \f s -> f (syGitPackages s) <&> \x -> s { syGitPackages = x }
 
 instance Y.ToYAML StackYaml where
-    toYAML StackYaml {..} = Y.mapping
+    toYAML StackYaml {..} = Y.mapping $
         [ "resolver"    Y..= syResolver
-        , "system-ghc"  Y..= sySystemGHC
         , "allow-newer" Y..= syAllowNewer
         , "packages"    Y..= map T.pack (Set.toList syPackages)
         , "extra-deps"  Y..= extraDeps
@@ -318,7 +316,8 @@ instance Y.ToYAML StackYaml where
             | (P.PkgName pn, flags) <- Map.toList syFlags
             , not (null flags)
             ]
-        ]
+        ] ++
+        [ "system-ghc"  Y..= v | Just v <- [sySystemGHC] ]
       where
         extraDeps = map (Y.toYAML . P.dispPkgId) (Set.toList syExtraDeps) ++
             [ Y.mapping
