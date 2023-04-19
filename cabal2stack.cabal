@@ -37,8 +37,10 @@ executable cabal2stack
 
   -- other dependencies
   build-depends:
+    , aeson                  >= 2.0 && < 2.2
     , cabal-plan            ^>=0.7.2.1
     , HsYAML                ^>=0.2.1.1
+    , HsYAML-aeson          ^>=0.2.0.1
     , optics-core           ^>=0.4
     , optics-extra          ^>=0.4
     , optparse-applicative  ^>=0.17.0.0
