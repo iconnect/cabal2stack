@@ -1,6 +1,7 @@
 "allow-newer": false
 "extra-deps":
 - "HsYAML-0.2.1.1"
+- "HsYAML-aeson-0.2.0.1"
 - "OneTuple-0.3.1"
 - "QuickCheck-2.14.2"
 - "StateVar-1.2.2"
